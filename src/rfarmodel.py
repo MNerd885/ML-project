@@ -1,0 +1,161 @@
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.tree import DecisionTreeRegressor
+from scipy.optimize import lsq_linear
+
+# ─────────────────────────────────────────────
+# 4. MODELLO RF+AR
+# ─────────────────────────────────────────────
+
+def fit_ar_per_leaf(tree: DecisionTreeRegressor,
+                    X_train: np.ndarray, y_train: np.ndarray,
+                    delta_y: int) -> dict:
+    """
+    Per ogni foglia dell'albero, fitta un modello AR lineare con vincoli
+    (Problem 1 del paper) usando scipy lsq_linear.
+
+    Returns:
+        leaf_models: dict {leaf_id: {'a': coeffs, 'f': bias}}
+    """
+    leaf_ids   = tree.apply(X_train)
+    leaf_models = {}
+
+    for leaf in np.unique(leaf_ids):
+        mask = (leaf_ids == leaf)
+        X_leaf = X_train[mask]
+        y_leaf = y_train[mask]
+
+        if len(y_leaf) < 2:
+            # Foglia con un solo campione: usa la media come fallback
+            leaf_models[leaf] = {"a": np.zeros(delta_y + 1), "f": float(y_leaf.mean())}
+            continue
+
+        # Matrice di regressione: usiamo i primi delta_y+1 lag come regressor
+        n_lag_cols = min(delta_y + 1, X_leaf.shape[1])
+        Lambda = X_leaf[:, :n_lag_cols]
+        lam    = y_leaf
+
+        # Vincoli fisici: coefficienti in [-2, 2], bias in [0, inf)
+        # (adattabili al dominio specifico)
+        lb = np.full(n_lag_cols, -2.0)
+        ub = np.full(n_lag_cols,  2.0)
+
+        result = lsq_linear(Lambda, lam, bounds=(lb, ub), method="bvls")
+        coeffs = result.x
+
+        leaf_models[leaf] = {
+            "a": coeffs[:-1] if len(coeffs) > 1 else coeffs,
+            "f": coeffs[-1]  if len(coeffs) > 1 else 0.0
+        }
+
+    return leaf_models
+
+
+class RFARModel:
+    """
+    Modello RF+AR: Random Forest con regressori AR per foglia.
+
+    Per semplicità di bozza, l'implementazione usa scikit-learn RF
+    per la struttura degli alberi e il routing, mentre i parametri AR
+    per foglia sono fittati separatamente con lsq_linear.
+
+    Per ogni stream p e ogni step j nell'orizzonte N, viene addestrato
+    un modello separato: in totale p × N modelli.
+    """
+
+    def __init__(self, n_horizon: int, delta_y: int,
+                 n_trees: int, min_leaf: int,
+                 fit_ar_leaves: bool = True):
+        self.n_horizon    = n_horizon
+        self.delta_y      = delta_y
+        self.n_trees      = n_trees
+        self.min_leaf     = min_leaf
+        self.fit_ar_leaves = fit_ar_leaves
+
+        # Dizionario: models[stream][j] = (RF, leaf_models)
+        self.models: dict = {}
+
+    def fit(self, X_train: np.ndarray, y_dict: dict):
+        """
+        Addestra un RF (e i relativi modelli AR per foglia) per ogni
+        combinazione (stream, step j).
+        """
+        for stream, y_train in y_dict.items():
+            self.models[stream] = {}
+            for j in range(self.n_horizon):
+                # Target: y(k + j + 1) — shift di j+1 passi
+                # Nota: per una bozza usiamo il target diretto;
+                # un'implementazione completa propagherebbe le predizioni
+                y_shifted = np.roll(y_train, -(j + 1))
+                y_shifted = y_shifted[:-(j + 1)]
+                X_j       = X_train[:-(j + 1)]
+
+                rf = RandomForestRegressor(
+                    n_estimators=self.n_trees,
+                    min_samples_leaf=self.min_leaf,
+                    random_state=42,
+                    n_jobs=-1
+                )
+                rf.fit(X_j, y_shifted)
+
+                leaf_models = {}
+                if self.fit_ar_leaves:
+                    # Fit AR per ogni albero della foresta
+                    for tree_est in rf.estimators_:
+                        lm = fit_ar_per_leaf(tree_est, X_j, y_shifted,
+                                             self.delta_y)
+                        # Aggrega (media) i parametri AR tra tutti gli alberi
+                        for leaf_id, params in lm.items():
+                            if leaf_id not in leaf_models:
+                                leaf_models[leaf_id] = {"a": [], "f": []}
+                            leaf_models[leaf_id]["a"].append(params["a"])
+                            leaf_models[leaf_id]["f"].append(params["f"])
+
+                    # Media dei parametri tra alberi (Eq. 6 del paper)
+                    for leaf_id in leaf_models:
+                        leaf_models[leaf_id]["a"] = np.mean(
+                            leaf_models[leaf_id]["a"], axis=0)
+                        leaf_models[leaf_id]["f"] = np.mean(
+                            leaf_models[leaf_id]["f"])
+
+                self.models[stream][j] = (rf, leaf_models)
+
+            print(f"[fit] Stream '{stream}': {self.n_horizon} modelli addestrati")
+
+    def predict(self, X_test: np.ndarray) -> dict:
+        """
+        Predice i valori futuri per ogni stream e ogni step j.
+
+        Returns:
+            preds: dict {stream: np.ndarray (n_samples, n_horizon)}
+        """
+        preds = {}
+        for stream, horizon_models in self.models.items():
+            stream_preds = []
+            for j in range(self.n_horizon):
+                rf, leaf_models = horizon_models[j]
+
+                if self.fit_ar_leaves and leaf_models:
+                    # Usa i parametri AR per foglia
+                    leaf_ids = rf.estimators_[0].apply(X_test)
+                    y_pred = np.array([
+                        np.dot(leaf_models.get(lid, {"a": np.zeros(1), "f": 0})["a"],
+                               X_test[i, :len(
+                                   leaf_models.get(lid, {"a": np.zeros(1)})["a"]
+                               )]) +
+                        leaf_models.get(lid, {"f": 0})["f"]
+                        for i, lid in enumerate(leaf_ids)
+                    ])
+                else:
+                    y_pred = rf.predict(X_test)
+
+                stream_preds.append(y_pred)
+
+            preds[stream] = np.array(stream_preds).T   # (n_samples, n_horizon)
+        return preds
+    
+
+# ─────────────────────────────────────────────
+# 5. TRAINING E PREDIZIONE  (→ vedi classe RFARModel sopra)
+# ─────────────────────────────────────────────
+# Il train/test split non è necessario: i due CSV sono già separati.

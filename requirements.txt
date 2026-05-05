@@ -1,0 +1,9 @@
+scikit-learn 
+pandas 
+numpy 
+statsmodels 
+matplotlib 
+cvxpy 
+scipy 
+seaborn
+holidays
