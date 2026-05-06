@@ -149,8 +149,8 @@ def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
     df["hour_cos"]  = np.cos(2 * np.pi * hour / 24)
 
     # Codifica ciclica dell'intervallo di 5 minuti al giorno (288 campioni totali in un giorno).
-    #df["tod_sin"]   = np.sin(2 * np.pi * minute_of_day / 288)
-    #df["tod_cos"]   = np.cos(2 * np.pi * minute_of_day / 288)
+    df["tod_sin"]   = np.sin(2 * np.pi * minute_of_day / 288)
+    df["tod_cos"]   = np.cos(2 * np.pi * minute_of_day / 288)
 
     # Codifica ciclica del giorno della settimana (ciclo di 7 giorni).
     df["dow_sin"]   = np.sin(2 * np.pi * day_of_week / 7)
@@ -175,7 +175,7 @@ def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
     covid_start = pd.Timestamp("2020-03-09")
     df["covid_period"] = (idx >= covid_start).astype(int)
 
-    print(f"[features] Aggiunte 12 feature temporali\n")
+    print(f"[features] Aggiunte 14 feature temporali\n")
     return df
 
 
@@ -199,7 +199,7 @@ def build_feature_matrix(df: pd.DataFrame, streams: list,
                 if any(c.startswith(f"{s}_lag") for s in streams)]
 
     temporal_cols = [
-        "hour_sin", "hour_cos", "dow_sin",  "dow_cos",  
+        "hour_sin", "hour_cos", "tod_sin",  "tod_cos", "dow_sin",  "dow_cos",  
         "woy_sin", "woy_cos", "is_weekend", "is_holiday", 
         "is_evening", "is_dazn_peak", "is_work_hour", "covid_period"
     ] if use_temporal else []

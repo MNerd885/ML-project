@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 # My Libraries
 from rfarmodel import RFARModel
 from preprocess_RFAR import *
-from constants import N_HORIZON
+from rfarmodel import RFARModel
+from constants import N_HORIZON, DELTA_Y
 # ─────────────────────────────────────────────
 # 6. VALUTAZIONE
 # ─────────────────────────────────────────────
@@ -87,9 +88,6 @@ def compare_and_plot(results_baseline: dict, results_enriched: dict,
                  fontsize=13, fontweight="bold", y=1.01)
     plt.tight_layout()
 
-    if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
-        print(f"[plot] Salvato in {save_path}")
     plt.show()
 
 
@@ -98,8 +96,7 @@ def compare_and_plot(results_baseline: dict, results_enriched: dict,
 # ─────────────────────────────────────────────
 
 def plot_feature_importance(model: RFARModel, feature_names: list,
-                             streams: list, top_n: int = 15,
-                             save_path: str = None):
+                             streams: list, top_n: int = DELTA_Y):
     """
     Visualizza le feature importance aggregate per ogni stream,
     mediando sui modelli dei diversi step dell'orizzonte.
@@ -140,7 +137,9 @@ def plot_feature_importance(model: RFARModel, feature_names: list,
                  fontsize=13, fontweight="bold")
     plt.tight_layout()
 
-    if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
-        print(f"[plot] Salvato in {save_path}")
     plt.show()
+
+def plot_fitted_model(model: RFARModel,):
+    
+    # Crea una griglia che si estende in base ai valori del dataset
+     X_grid = np.arange(min(model.models.values()), max(model.models.values()), 0.01).reshape(-1,1)

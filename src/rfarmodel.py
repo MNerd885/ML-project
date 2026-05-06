@@ -2,6 +2,7 @@ import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.tree import DecisionTreeRegressor
 from scipy.optimize import lsq_linear
+from joblib import Parallel, delayed # Per parallelizzare le operazioni con la CPU (lsq_linear)
 
 # ─────────────────────────────────────────────
 # 4. MODELLO RF+AR
@@ -94,29 +95,34 @@ class RFARModel:
                     n_estimators=self.n_trees,
                     min_samples_leaf=self.min_leaf,
                     random_state=42,
-                    n_jobs=-1
+                    oob_score=True,
+                    bootstrap=True
                 )
                 rf.fit(X_j, y_shifted)
 
                 leaf_models = {}
                 if self.fit_ar_leaves:
+                    
                     # Fit AR per ogni albero della foresta
-                    for tree_est in rf.estimators_:
-                        lm = fit_ar_per_leaf(tree_est, X_j, y_shifted,
-                                             self.delta_y)
-                        # Aggrega (media) i parametri AR tra tutti gli alberi
+                    # Esegue fit_ar_per_leaf su tutti gli alberi in parallelo
+                    results = Parallel(n_jobs=-1)(
+                        delayed(fit_ar_per_leaf)(tree_est, X_j, y_shifted, self.delta_y)
+                            for tree_est in rf.estimators_
+                    )
+
+                    # Aggrega i risultati (sostituisce il vecchio ciclo for)
+                    for lm in results:                          # lm = leaf_models di un albero
                         for leaf_id, params in lm.items():
                             if leaf_id not in leaf_models:
                                 leaf_models[leaf_id] = {"a": [], "f": []}
                             leaf_models[leaf_id]["a"].append(params["a"])
                             leaf_models[leaf_id]["f"].append(params["f"])
 
+
                     # Media dei parametri tra alberi (Eq. 6 del paper)
                     for leaf_id in leaf_models:
-                        leaf_models[leaf_id]["a"] = np.mean(
-                            leaf_models[leaf_id]["a"], axis=0)
-                        leaf_models[leaf_id]["f"] = np.mean(
-                            leaf_models[leaf_id]["f"])
+                        leaf_models[leaf_id]["a"] = np.mean(leaf_models[leaf_id]["a"], axis=0)
+                        leaf_models[leaf_id]["f"] = np.mean(leaf_models[leaf_id]["f"])
 
                 self.models[stream][j] = (rf, leaf_models)
 
@@ -152,6 +158,7 @@ class RFARModel:
                 stream_preds.append(y_pred)
 
             preds[stream] = np.array(stream_preds).T   # (n_samples, n_horizon)
+        
         return preds
     
 

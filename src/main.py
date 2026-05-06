@@ -64,7 +64,7 @@ def main(train_path: str, test_path: str, access_point: str):
 
     X_tr_e, _,    feat_en_tr_temp = build_feature_matrix(
         df_train_ext, streams, use_temporal=True)
-    X_te_e, _,    _         = build_feature_matrix(
+    X_te_e, y_te_e,    _         = build_feature_matrix(
         df_test_ext,  streams, use_temporal=True)
 
     # ── 4. Training ───────────────────────────
@@ -85,7 +85,7 @@ def main(train_path: str, test_path: str, access_point: str):
     res_base = evaluate(model_base, X_te_b, y_te)
 
     print("\n[ARRICCHITO]")
-    res_enrich = evaluate(model_enri, X_te_e, y_te)
+    res_enrich = evaluate(model_enri, X_te_e, y_te_e)
 
     # ── 6. Plot confronto ─────────────────────
     compare_and_plot(res_base, res_enrich, streams)
@@ -98,6 +98,8 @@ def main(train_path: str, test_path: str, access_point: str):
     
 
     # ── 8. Riepilogo numerico ─────────────────
+    
+    # Per N = 1
     print("\n" + "=" * 50)
     print("RIEPILOGO NRMSE (%) @ N=1")
     print("=" * 50)
@@ -107,6 +109,19 @@ def main(train_path: str, test_path: str, access_point: str):
         if stream in res_base and stream in res_enrich:
             b = res_base[stream][0]
             e = res_enrich[stream][0]
+            print(f"{stream:<15} {b:>10.2f}% {e:>11.2f}% {e - b:>+7.2f}%")
+
+
+    # Per N = 10
+    print("\n" + "=" * 50)
+    print("RIEPILOGO NRMSE (%) @ N=10")
+    print("=" * 50)
+    print(f"{'Stream':<15} {'Baseline':>10} {'Arricchito':>12} {'Delta':>8}")
+    print("-" * 50)
+    for stream in streams:
+        if stream in res_base and stream in res_enrich:
+            b = res_base[stream][9]
+            e = res_enrich[stream][9]
             print(f"{stream:<15} {b:>10.2f}% {e:>11.2f}% {e - b:>+7.2f}%")
 
 
