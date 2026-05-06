@@ -3,7 +3,7 @@
 # ─────────────────────────────────────────────
 
 # Parametri del paper (Tabella I)
-DELTA_Y     = 5          # ordine del lag
+DELTA_Y     = 10          # ordine del lag
 N_HORIZON   = 10         # orizzonte predittivo (10 step = 50 minuti)
 N_TREES     = 30         # numero di alberi per RF
 MIN_LEAF    = 5          # minimo campioni per foglia (RF)

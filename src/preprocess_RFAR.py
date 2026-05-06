@@ -68,13 +68,20 @@ def preprocess(df: pd.DataFrame) -> pd.DataFrame:
     Il dataset Sonicatel non ha missing values, quindi questa funzione
     è principalmente un safety net.
     """
+    # Conta tutti i valori NaN nel DataFrame: il primo .sum()
+    # somma per colonna, il secondo somma tutti i totali per colonna 
+    # ottenendo un singolo numero.
     n_missing = df.isna().sum().sum()
+
     if n_missing > 0:
         df = df.interpolate(method="linear", limit=3)
         df = df.dropna()
         print(f"[preprocess] Interpolati/rimossi {n_missing} missing values")
 
+    # Porta a zero tutti i valori negativi. Nel traffico di rete i valori negativi
+    # sono artefatti di raccolta dati e non hanno senso fisico.
     df = df.clip(lower=0)
+
     print(f"[preprocess] {len(df)} campioni pronti\n")
     return df
 
@@ -88,10 +95,16 @@ def add_lag_features(df: pd.DataFrame, streams: list, delta_y: int = DELTA_Y) ->
     Crea il vettore di stato x(k) = [y(k), y(k-1), ..., y(k-delta_y)]
     per ogni stream, come nel paper.
     """
+
+    # Per ogni stream e per ogni valore di lag da 1 a DELTA_Y, crea una nuova colonna
+    # che contiene il valore del segnale lag passi indietro nel tempo. Ad esempio IN_lag1
+    # contiene IN shiftato di un campione (5 minuti fa), IN_lag2 di due campioni 
+    # (10 minuti fa), ecc. Questo trasforma la serie temporale in un problema di regressione
     for stream in streams:
         for lag in range(1, delta_y + 1):
             df[f"{stream}_lag{lag}"] = df[stream].shift(lag)
 
+    # Le prime DELTA_Y righe avranno NaN nei lag (non ci sono campioni passati), quindi vengono eliminate.
     df = df.dropna()
     return df
 
@@ -114,23 +127,36 @@ def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
       - is_work_hour:  lun-ven 9:00–18:00 (picco VoIP/business)
       - covid_period:  dopo marzo 2020 (shift strutturale VoIP)
     """
+    
+    # Salva l'indice 'DateTimeIndex in una variabile locale per comodità'
     idx = df.index
 
-    # ── Cicliche ──────────────────────────────
+    # Calcola l'ora frazionaria del giorno (es. 14:30 → 14.5). Serve per la codifica ciclica dell'ora.
+    # Lo stesso vale per le altre quantità
     hour           = idx.hour + idx.minute / 60.0
     minute_of_day  = idx.hour * 12 + idx.minute // 5   # 0..287
+    
+    # Estrae rispettivamente il giorno della settimana (0=lunedì, 6=domenica) e 
+    # il numero della settimana nell'anno secondo lo standard ISO
     day_of_week    = idx.dayofweek                      # 0=lun, 6=dom
     week_of_year   = idx.isocalendar().week.astype(float)
 
+    # Codifica ciclica dell'ora del giorno. Usare sin/cos invece del numero grezzo (0-23) 
+    # garantisce che le ore 23 e 0 siano "vicine" numericamente, cosa che un numero 
+    # intero non garantirebbe. Lo stesso principio si applica a tutte le coppie sin/cos che seguono.
+    # hour_sin e hour_cos codificano già il fatto che i campioni sono 288/giorno
     df["hour_sin"]  = np.sin(2 * np.pi * hour / 24)
     df["hour_cos"]  = np.cos(2 * np.pi * hour / 24)
 
-    df["tod_sin"]   = np.sin(2 * np.pi * minute_of_day / 288)
-    df["tod_cos"]   = np.cos(2 * np.pi * minute_of_day / 288)
+    # Codifica ciclica dell'intervallo di 5 minuti al giorno (288 campioni totali in un giorno).
+    #df["tod_sin"]   = np.sin(2 * np.pi * minute_of_day / 288)
+    #df["tod_cos"]   = np.cos(2 * np.pi * minute_of_day / 288)
 
+    # Codifica ciclica del giorno della settimana (ciclo di 7 giorni).
     df["dow_sin"]   = np.sin(2 * np.pi * day_of_week / 7)
     df["dow_cos"]   = np.cos(2 * np.pi * day_of_week / 7)
 
+    # Codifica ciclica della settimana dell'anno (stagionalità annuale, ciclo di 52 settimane)
     df["woy_sin"]   = np.sin(2 * np.pi * week_of_year / 52)
     df["woy_cos"]   = np.cos(2 * np.pi * week_of_year / 52)
 
@@ -149,7 +175,7 @@ def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
     covid_start = pd.Timestamp("2020-03-09")
     df["covid_period"] = (idx >= covid_start).astype(int)
 
-    print(f"[features] Aggiunte 14 feature temporali\n")
+    print(f"[features] Aggiunte 12 feature temporali\n")
     return df
 
 
@@ -168,14 +194,14 @@ def build_feature_matrix(df: pd.DataFrame, streams: list,
         y:  dict {stream: np.ndarray (n_samples,)}
         feature_names: list[str]
     """
+    # Seleziona tutte le colonne lag presenti nel DataFrame, es. IN_lag1, IN_lag2, OUT_lag1, ecc.
     lag_cols = [c for c in df.columns
                 if any(c.startswith(f"{s}_lag") for s in streams)]
 
     temporal_cols = [
-        "hour_sin", "hour_cos", "tod_sin", "tod_cos",
-        "dow_sin",  "dow_cos",  "woy_sin", "woy_cos",
-        "is_weekend", "is_holiday", "is_evening",
-        "is_dazn_peak", "is_work_hour", "covid_period"
+        "hour_sin", "hour_cos", "dow_sin",  "dow_cos",  
+        "woy_sin", "woy_cos", "is_weekend", "is_holiday", 
+        "is_evening", "is_dazn_peak", "is_work_hour", "covid_period"
     ] if use_temporal else []
 
     # Usa solo le colonne temporali presenti nel df

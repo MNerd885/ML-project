@@ -52,9 +52,9 @@ def main(train_path: str, test_path: str, access_point: str):
     # ── 2. Feature engineering ────────────────
     # Applica lag e feature temporali su train e test separatamente
     df_train = add_lag_features(df_train, streams, DELTA_Y)
-    df_train = add_temporal_features(df_train)
+    df_train_ext = add_temporal_features(df_train)
     df_test  = add_lag_features(df_test,  streams, DELTA_Y)
-    df_test  = add_temporal_features(df_test)
+    df_test_ext  = add_temporal_features(df_test)
 
     # ── 3. Matrici feature ────────────────────
     X_tr_b, y_tr, feat_paper_lag = build_feature_matrix(
@@ -63,9 +63,9 @@ def main(train_path: str, test_path: str, access_point: str):
         df_test,  streams, use_temporal=False)
 
     X_tr_e, _,    feat_en_tr_temp = build_feature_matrix(
-        df_train, streams, use_temporal=True)
+        df_train_ext, streams, use_temporal=True)
     X_te_e, _,    _         = build_feature_matrix(
-        df_test,  streams, use_temporal=True)
+        df_test_ext,  streams, use_temporal=True)
 
     # ── 4. Training ───────────────────────────
     print("=" * 50)
@@ -113,7 +113,7 @@ def main(train_path: str, test_path: str, access_point: str):
 if __name__ == "__main__":
     TRAIN_PATH   = "datasets/SONICATEL_traffic_train.csv"  # <- modifica con il tuo percorso
     TEST_PATH    = "datasets/SONICATEL_traffic_test.csv"   # <- modifica con il tuo percorso
-    ACCESS_POINT = "FA1"                           # "FA1" o "FA2"
-    #ACCESS_POINT = "FA2"                           # "FA1" o "FA2"
+    #ACCESS_POINT = "FA1"                           
+    ACCESS_POINT = "FA2"                         
 
     main(TRAIN_PATH, TEST_PATH, ACCESS_POINT)
