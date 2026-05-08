@@ -10,7 +10,7 @@ per migliorare la predizione, in particolare per traffico DAZN e Netflix.
 Struttura:
     1. Configurazione e costanti
     2. Caricamento e preprocessing del dataset
-    3. Feature engineering (lag + feature temporali)
+    3. Aggiunta delle feature (lag + feature temporali)
     4. Modello RF+AR (replica del paper)
     5. Training e predizione
     6. Valutazione (NRMSE)
@@ -28,7 +28,7 @@ warnings.filterwarnings("ignore")
 from rfarmodel import RFARModel
 from preprocess_RFAR import *
 from evaluation import *
-from constants import N_TREES, MIN_LEAF
+from constants import N_TREES, MIN_LEAF, TRAIN_PATH,TEST_PATH, ACCESS_POINT
 
 
 def main(train_path: str, test_path: str, access_point: str):
@@ -72,13 +72,13 @@ def main(train_path: str, test_path: str, access_point: str):
     print("Training BASELINE (solo lag)")
     print("=" * 50)
     model_base = RFARModel(N_HORIZON,DELTA_Y,N_TREES,MIN_LEAF,fit_ar_leaves=True)
-    model_base.fit(X_tr_b, y_tr)
+    model_base.fit_rf_ar(X_tr_b, y_tr)
 
     print("\n" + "=" * 50)
     print("Training ARRICCHITO (lag + feature temporali)")
     print("=" * 50)
     model_enri = RFARModel(N_HORIZON,DELTA_Y,N_TREES,MIN_LEAF,fit_ar_leaves=True)
-    model_enri.fit(X_tr_e, y_tr)
+    model_enri.fit_rf_ar(X_tr_e, y_tr)
 
     # ── 5. Valutazione ────────────────────────
     print("\n[BASELINE]")
@@ -125,10 +125,6 @@ def main(train_path: str, test_path: str, access_point: str):
             print(f"{stream:<15} {b:>10.2f}% {e:>11.2f}% {e - b:>+7.2f}%")
 
 
-if __name__ == "__main__":
-    TRAIN_PATH   = "datasets/SONICATEL_traffic_train.csv"  # <- modifica con il tuo percorso
-    TEST_PATH    = "datasets/SONICATEL_traffic_test.csv"   # <- modifica con il tuo percorso
-    #ACCESS_POINT = "FA1"                           
-    ACCESS_POINT = "FA2"                         
+if __name__ == "__main__":                       
 
     main(TRAIN_PATH, TEST_PATH, ACCESS_POINT)

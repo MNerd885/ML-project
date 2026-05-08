@@ -163,10 +163,19 @@ def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
     # ── Binarie contestuali ───────────────────
     it_holidays = holidays.Italy()
 
+    # True per sabato (5) e domenica (6), poi convertito in 0/1 con .astype(int).
     df["is_weekend"]   = (day_of_week >= 5).astype(int)
+
+    # idx.normalize() tronca i timestamp alla mezzanotte (rimuove l'ora). Per ogni data, controlla se è una festività italiana e restituisce 1 o 0.
     df["is_holiday"]   = idx.normalize().map(lambda d: int(d in it_holidays))
+
+    # 1 nelle ore serali (19:00–23:00), fascia oraria dove il traffico di streaming Netflix/DAZN è tipicamente massimo.
     df["is_evening"]   = ((idx.hour >= 19) & (idx.hour <= 23)).astype(int)
+
+    # 1 solo quando è sia weekend che sera: identifica il picco caratteristico del traffico DAZN (partite sportive in streaming nel weekend sera).
     df["is_dazn_peak"] = (df["is_weekend"] & df["is_evening"]).astype(int)
+
+    # 1 durante gli orari lavorativi (lunedì-venerdì, 9:00-18:00), fascia dove il traffico VoIP aziendale è predominante.
     df["is_work_hour"] = (
         (day_of_week < 5) & (idx.hour >= 9) & (idx.hour < 18)
     ).astype(int)
@@ -180,7 +189,7 @@ def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_feature_matrix(df: pd.DataFrame, streams: list,
-                          use_temporal: bool = True) -> tuple:
+                          use_temporal: bool) -> tuple:
     """
     Costruisce la matrice X (input) e il dizionario y (target per stream).
 
@@ -198,6 +207,8 @@ def build_feature_matrix(df: pd.DataFrame, streams: list,
     lag_cols = [c for c in df.columns
                 if any(c.startswith(f"{s}_lag") for s in streams)]
 
+    # Se use_temporal=True, prepara la lista delle feature temporali; se False, restituisce una 
+    # lista vuota (configurazione baseline del paper).
     temporal_cols = [
         "hour_sin", "hour_cos", "tod_sin",  "tod_cos", "dow_sin",  "dow_cos",  
         "woy_sin", "woy_cos", "is_weekend", "is_holiday", 
@@ -207,8 +218,13 @@ def build_feature_matrix(df: pd.DataFrame, streams: list,
     # Usa solo le colonne temporali presenti nel df
     temporal_cols = [c for c in temporal_cols if c in df.columns]
 
+    # Concatena le liste di colonne e costruisce la matrice X dei campioni. 
+    # .values converte il DataFrame in un array NumPy puro, necessario per scikit-learn
     feature_names = lag_cols + temporal_cols
     X = df[feature_names].values
+
+    # Costruisce un dizionario dove ogni chiave è il nome di uno stream e il valore 
+    # è l'array del segnale target (i valori reali da predire).
     y = {stream: df[stream].values for stream in streams}
 
     label = "lag + temporal" if use_temporal else "solo lag (paper)"

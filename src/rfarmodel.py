@@ -13,19 +13,24 @@ def fit_ar_per_leaf(tree: DecisionTreeRegressor,
                     delta_y: int) -> dict:
     """
     Per ogni foglia dell'albero, fitta un modello AR lineare con vincoli
-    (Problem 1 del paper) usando scipy lsq_linear.
+    (Problem 1 del paper) usando scipy.lsq_linear.
 
     Returns:
         leaf_models: dict {leaf_id: {'a': coeffs, 'f': bias}}
     """
+    # Serve per raggruppare i campioni per foglia.
     leaf_ids   = tree.apply(X_train)
     leaf_models = {}
 
+    # Per ogni foglia distinta, crea una maschera booleana per selezionare 
+    # solo i campioni che appartengono a quella foglia, e li isola in X_leaf e y_leaf.
     for leaf in np.unique(leaf_ids):
         mask = (leaf_ids == leaf)
         X_leaf = X_train[mask]
         y_leaf = y_train[mask]
 
+        # Caso degenere: se una foglia ha un solo campione, non si può fittare 
+        # una regressione. Si usa la media del campione come valore costante di fallback.
         if len(y_leaf) < 2:
             # Foglia con un solo campione: usa la media come fallback
             leaf_models[leaf] = {"a": np.zeros(delta_y + 1), "f": float(y_leaf.mean())}
@@ -34,16 +39,23 @@ def fit_ar_per_leaf(tree: DecisionTreeRegressor,
         # Matrice di regressione: usiamo i primi delta_y+1 lag come regressor
         n_lag_cols = min(delta_y + 1, X_leaf.shape[1])
         Lambda = X_leaf[:, :n_lag_cols]
-        lam    = y_leaf
+        lam_y = y_leaf # Valore target
 
-        # Vincoli fisici: coefficienti in [-2, 2], bias in [0, inf)
-        # (adattabili al dominio specifico)
+        # Definisce i vincoli fisici sui coefficienti AR: devono stare tra -2 e +2. 
+        # Questi vincoli prevengono coefficienti troppo grandi e garantiscono stabilità 
+        # del modello AR
         lb = np.full(n_lag_cols, -2.0)
         ub = np.full(n_lag_cols,  2.0)
 
-        result = lsq_linear(Lambda, lam, bounds=(lb, ub), method="bvls")
+        # Risolve il problema di regressione lineare vincolata (Problem 1 del paper) 
+        # usando l'algoritmo BVLS (Bounded Variable Least Squares). result.x 
+        # contiene i coefficienti ottimali trovati.
+        result = lsq_linear(Lambda, lam_y, bounds=(lb, ub), method="bvls")
         coeffs = result.x
 
+        # Salva i coefficienti AR (a, tutti tranne l'ultimo) e il bias 
+        # (f, l'ultimo coefficiente) per questa foglia. 
+        # Se c'è un solo coefficiente, il bias è zero.
         leaf_models[leaf] = {
             "a": coeffs[:-1] if len(coeffs) > 1 else coeffs,
             "f": coeffs[-1]  if len(coeffs) > 1 else 0.0
@@ -73,13 +85,18 @@ class RFARModel:
         self.min_leaf     = min_leaf
         self.fit_ar_leaves = fit_ar_leaves
 
-        # Dizionario: models[stream][j] = (RF, leaf_models)
+        # Dizionario vuoto che alla fine del training conterrà la struttura 
+        # models[stream][j] = (RF, leaf_models), ovvero per ogni stream e ogni 
+        # step dell'orizzonte, la coppia (foresta, parametri AR per foglia).
         self.models: dict = {}
 
-    def fit(self, X_train: np.ndarray, y_dict: dict):
+    def fit_rf_ar(self, X_train: np.ndarray, y_dict: dict) :
         """
         Addestra un RF (e i relativi modelli AR per foglia) per ogni
         combinazione (stream, step j).
+
+        Returns:
+            models: dict { 'stream'}
         """
         for stream, y_train in y_dict.items():
             self.models[stream] = {}

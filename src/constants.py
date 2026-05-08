@@ -19,3 +19,9 @@ STREAMS_FA2 = ["IN", "OUT", "VOIP", "Netflix", "DAZN"]
 # FA2 Netflix: train ~55 giorni, test ~2 giorni
 # FA2 DAZN:   train ~29 giorni, test ~2 giorni (weekend)
 TRAIN_RATIO = 0.60       # usato come fallback se non si specificano i giorni
+
+# Dataset di training e testing e numero dell'access point
+TRAIN_PATH   = "../datasets/SONICATEL_traffic_train.csv" 
+TEST_PATH    = "../datasets/SONICATEL_traffic_test.csv"   
+ACCESS_POINT = "FA1"                           
+#ACCESS_POINT = "FA2" 

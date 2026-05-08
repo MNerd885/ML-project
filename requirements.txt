@@ -8,5 +8,3 @@ scipy
 seaborn
 holidays
 joblib # Per l'esecuzione in parallelo di task con la cpu
-cuml
-GPUtil # Per verificare se la GPU in uso è una NVIDIA o meno
