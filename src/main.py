@@ -1,130 +1,105 @@
-"""
-RF+AR Traffic Prediction Pipeline - Extended with Temporal Features
-===================================================================
-Basato su: "Machine Learning-based Approaches Comparison for Netflix/DAZN
-Streaming and Real Traffic Prediction" (Globecom)
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error
+import matplotlib.pyplot as plt
 
-Estensione (Punto 5): aggiunta di feature temporali cicliche e contestuali
-per migliorare la predizione, in particolare per traffico DAZN e Netflix.
+# ─── CONFIGURAZIONE ───────────────────────────────────────────────────────
+TRAIN_PATH = 'datasets/SONICATEL_traffic_train.csv'
+TEST_PATH  = 'datasets//SONICATEL_traffic_test.csv'
+DELTA_Y    = 5
+N_HORIZON  = 10
+N_TREES    = 30
+MIN_LEAF   = 5
+STREAMS    = ['IN', 'OUT', 'VOIP', 'Netflix', 'DAZN']
+STREAMS    = ['IN', 'OUT', 'VOIP']
 
-Struttura:
-    1. Configurazione e costanti
-    2. Caricamento e preprocessing del dataset
-    3. Aggiunta delle feature (lag + feature temporali)
-    4. Modello RF+AR (replica del paper)
-    5. Training e predizione
-    6. Valutazione (NRMSE)
-    7. Confronto baseline vs arricchito
-    8. Feature importance
-"""
+# ─── CARICAMENTO ──────────────────────────────────────────────────────────
+Ttr = pd.read_csv(TRAIN_PATH)
+Tte = pd.read_csv(TEST_PATH)
 
-# ─────────────────────────────────────────────
-# 0. IMPORTS
-# ─────────────────────────────────────────────
-import warnings
-warnings.filterwarnings("ignore")
+for df in [Ttr, Tte]:
+    df['timestamp'] = pd.to_datetime(df[['year','month','day','hour']].rename(columns={'hour':'hour'}).assign(minute=df['min']))
+    df.set_index('timestamp', inplace=True)
 
-# My Libraries
-from rfarmodel import RFARModel
-from preprocess_RFAR import *
-from evaluation import *
-from constants import N_TREES, MIN_LEAF, TRAIN_PATH,TEST_PATH, ACCESS_POINT
+Ytr = Ttr[STREAMS].clip(lower=0)
+Yte = Tte[STREAMS].clip(lower=0)
+ts_train = Ttr.index
+ts_test  = Tte.index
 
+print(f'Train: {len(Ytr)} campioni | Test: {len(Yte)} campioni')
 
-def main(train_path: str, test_path: str, access_point: str):
-    """
-    Pipeline completa con train e test su file separati,
-    come forniti da Sonicatel.
+# ─── LAG FEATURES ─────────────────────────────────────────────────────────
+def make_lags(Y, delta_y):
+    return pd.concat([Y.shift(d).add_suffix(f'_lag{d}') for d in range(1, delta_y+1)], axis=1).iloc[delta_y:]
 
-    Args:
-        train_path:   percorso al CSV di training
-        test_path:    percorso al CSV di test
-        access_point: "FA1" o "FA2" (FA2 include Netflix e DAZN)
-    """
-    streams = STREAMS_FA1 if access_point == "FA1" else STREAMS_FA2
+Xtr_lag = make_lags(Ytr, DELTA_Y)
+Xte_lag = make_lags(Yte, DELTA_Y)
+Ytr = Ytr.iloc[DELTA_Y:];  ts_train = ts_train[DELTA_Y:]
+Yte = Yte.iloc[DELTA_Y:];  ts_test  = ts_test[DELTA_Y:]
 
-    # ── 1. Carica e preprocessa ───────────────
-    df_train = load_dataset(train_path, access_point)
-    df_test  = load_dataset(test_path,  access_point)
-    df_train = preprocess(df_train)
-    df_test  = preprocess(df_test)
+# ─── FEATURE TEMPORALI ────────────────────────────────────────────────────
+def make_temporal(ts):
+    h   = ts.hour + ts.minute / 60
+    tod = ts.hour * 12 + ts.minute // 5
+    dow = ts.dayofweek
+    woy = ts.isocalendar().week.astype(float)
+    return pd.DataFrame({
+        'hour_sin':     np.sin(2*np.pi*h/24),
+        'hour_cos':     np.cos(2*np.pi*h/24),
+        'tod_sin':      np.sin(2*np.pi*tod/288),
+        'tod_cos':      np.cos(2*np.pi*tod/288),
+        'dow_sin':      np.sin(2*np.pi*dow/7),
+        'dow_cos':      np.cos(2*np.pi*dow/7),
+        'woy_sin':      np.sin(2*np.pi*woy/52),
+        'woy_cos':      np.cos(2*np.pi*woy/52),
+        'is_weekend':   (dow >= 5).astype(int),
+        'is_evening':   ((ts.hour >= 19) & (ts.hour <= 23)).astype(int),
+        'is_dazn_peak': ((dow >= 5) & (ts.hour >= 19) & (ts.hour <= 23)).astype(int),
+        'is_work_hour': ((dow < 5) & (ts.hour >= 9) & (ts.hour < 18)).astype(int),
+        'covid_period': (ts >= pd.Timestamp('2020-03-09')).astype(int),
+    }, index=ts)
 
-    # ── 2. Feature engineering ────────────────
-    # Applica lag e feature temporali su train e test separatamente
-    df_train = add_lag_features(df_train, streams, DELTA_Y)
-    df_train_ext = add_temporal_features(df_train)
-    df_test  = add_lag_features(df_test,  streams, DELTA_Y)
-    df_test_ext  = add_temporal_features(df_test)
+Xtr_temp = make_temporal(ts_train)
+Xte_temp = make_temporal(ts_test)
 
-    # ── 3. Matrici feature ────────────────────
-    X_tr_b, y_tr, feat_paper_lag = build_feature_matrix(
-        df_train, streams, use_temporal=False)
-    X_te_b, y_te, _         = build_feature_matrix(
-        df_test,  streams, use_temporal=False)
+Xtr_b = Xtr_lag.values;                        Xte_b = Xte_lag.values
+Xtr_e = np.hstack([Xtr_lag, Xtr_temp]);        Xte_e = np.hstack([Xte_lag, Xte_temp])
+Ytr   = Ytr.values;                            Yte   = Yte.values
 
-    X_tr_e, _,    feat_en_tr_temp = build_feature_matrix(
-        df_train_ext, streams, use_temporal=True)
-    X_te_e, y_te_e,    _         = build_feature_matrix(
-        df_test_ext,  streams, use_temporal=True)
+# ─── TRAINING E VALUTAZIONE ───────────────────────────────────────────────
+nrmse_base = np.zeros((len(STREAMS), N_HORIZON))
+nrmse_enri = np.zeros((len(STREAMS), N_HORIZON))
 
-    # ── 4. Training ───────────────────────────
-    print("=" * 50)
-    print("Training BASELINE (solo lag)")
-    print("=" * 50)
-    model_base = RFARModel(N_HORIZON,DELTA_Y,N_TREES,MIN_LEAF,fit_ar_leaves=True)
-    model_base.fit_rf_ar(X_tr_b, y_tr)
+for mode, (Xtr, Xte, label) in enumerate([(Xtr_b, Xte_b, 'BASELINE'), (Xtr_e, Xte_e, 'ARRICCHITO')]):
+    print(f'\n[{label}]')
+    for s, stream in enumerate(STREAMS):
+        for j in range(N_HORIZON):
+            n  = len(Xtr) - (j+1)
+            rf = RandomForestRegressor(n_estimators=N_TREES, min_samples_leaf=MIN_LEAF, n_jobs=-1, random_state=42)
+            rf.fit(Xtr[:n], Ytr[j+1:j+1+n, s])
+            yp = rf.predict(Xte)
+            yt = Yte[j+1:len(yp)+j+1, s]
+            yp = yp[:len(yt)]
+            err = np.sqrt(mean_squared_error(yt, yp)) / (yt.max() - yt.min()) * 100
+            if mode == 0: nrmse_base[s, j] = err
+            else:         nrmse_enri[s, j] = err
+        e = nrmse_base if mode == 0 else nrmse_enri
+        print(f'  {stream}: N=1 → {e[s,0]:.2f}%  N=10 → {e[s,-1]:.2f}%')
 
-    print("\n" + "=" * 50)
-    print("Training ARRICCHITO (lag + feature temporali)")
-    print("=" * 50)
-    model_enri = RFARModel(N_HORIZON,DELTA_Y,N_TREES,MIN_LEAF,fit_ar_leaves=True)
-    model_enri.fit_rf_ar(X_tr_e, y_tr)
+# ─── PLOT ─────────────────────────────────────────────────────────────────
+fig, axes = plt.subplots(len(STREAMS), 1, figsize=(9, 3*len(STREAMS)), sharex=True)
+for ax, s, stream in zip(axes, range(len(STREAMS)), STREAMS):
+    ax.plot(range(1, N_HORIZON+1), nrmse_base[s], 'o--r', lw=1.5, label='RF (solo lag)')
+    ax.plot(range(1, N_HORIZON+1), nrmse_enri[s], 's-b', lw=2.0, label='RF + temporali')
+    ax.set_ylabel('NRMSE (%)'); ax.set_title(stream); ax.legend(fontsize=8); ax.grid(True)
+axes[-1].set_xlabel('Prediction Horizon N')
+plt.suptitle('Confronto NRMSE: Baseline vs Feature Temporali', fontsize=13)
+plt.tight_layout(); plt.show()
 
-    # ── 5. Valutazione ────────────────────────
-    print("\n[BASELINE]")
-    res_base = evaluate(model_base, X_te_b, y_te)
-
-    print("\n[ARRICCHITO]")
-    res_enrich = evaluate(model_enri, X_te_e, y_te_e)
-
-    # ── 6. Plot confronto ─────────────────────
-    compare_and_plot(res_base, res_enrich, streams)
-
-    # ── 7. Feature importance ─────────────────
-    # Importanza delle feature nel training del modello del paper
-    plot_feature_importance(model_base, feat_paper_lag, streams)
-
-    plot_feature_importance(model_enri, feat_en_tr_temp, streams)
-    
-
-    # ── 8. Riepilogo numerico ─────────────────
-    
-    # Per N = 1
-    print("\n" + "=" * 50)
-    print("RIEPILOGO NRMSE (%) @ N=1")
-    print("=" * 50)
-    print(f"{'Stream':<15} {'Baseline':>10} {'Arricchito':>12} {'Delta':>8}")
-    print("-" * 50)
-    for stream in streams:
-        if stream in res_base and stream in res_enrich:
-            b = res_base[stream][0]
-            e = res_enrich[stream][0]
-            print(f"{stream:<15} {b:>10.2f}% {e:>11.2f}% {e - b:>+7.2f}%")
-
-
-    # Per N = 10
-    print("\n" + "=" * 50)
-    print("RIEPILOGO NRMSE (%) @ N=10")
-    print("=" * 50)
-    print(f"{'Stream':<15} {'Baseline':>10} {'Arricchito':>12} {'Delta':>8}")
-    print("-" * 50)
-    for stream in streams:
-        if stream in res_base and stream in res_enrich:
-            b = res_base[stream][9]
-            e = res_enrich[stream][9]
-            print(f"{stream:<15} {b:>10.2f}% {e:>11.2f}% {e - b:>+7.2f}%")
-
-
-if __name__ == "__main__":                       
-
-    main(TRAIN_PATH, TEST_PATH, ACCESS_POINT)
+# ─── RIEPILOGO ────────────────────────────────────────────────────────────
+print(f'\n{"Stream":<15} {"Baseline":>10} {"Arricchito":>12} {"Delta":>8}')
+print('-' * 48)
+for s, stream in enumerate(STREAMS):
+    b, e = nrmse_base[s,0], nrmse_enri[s,0]
+    print(f'{stream:<15} {b:>10.2f}% {e:>11.2f}% {e-b:>+8.2f}%')
