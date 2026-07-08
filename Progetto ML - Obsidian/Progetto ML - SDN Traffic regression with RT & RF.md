@@ -1,6 +1,6 @@
 ## Ragionamento sul da farsi
 
-In questo progetto devo mostrare come le previsioni fatte sul traffico migliorino usando l'approccio con RT & RF sfruttando il modello autoregressivo che devo costruire a partire dal dataset per ogni Target e soprattutto voglio mostrare come la scelta di quanta informazione voglio per la mia predizione influisca sul NRMSE ottenuto per ciascun Target. Innanzitutto devo definire quali sono le feature del dataset che utilizzo per predire il traffico di rete dei Fiber Access :
+In questo progetto devo mostrare come le previsioni fatte sul traffico migliorino usando l'approccio con RT & RF sfruttando il modello autoregressivo che devo costruire a partire dal dataset per ogni Target e soprattutto voglio mostrare come la scelta di quanti campioni devo avere per foglia influisca sull'OOB error e congiuntamente voglio mostrare come il NRMSE diminuisca all'aumentare degli alberi. Innanzitutto devo definire quali sono le feature del dataset che utilizzo per predire il traffico di rete dei Fiber Access :
 
 1. Le **Feature** sono le caratteristiche che descrivono il sistema, in questo caso sono: *year*, *month*, *day*, *hour*, *min*, *dayweek*, *IN*, *OUT* .
 2. Le variabili **Target** sono le tipologie di traffico che si vuole prevedere, oovvero: *VOIP*, *Netflix*, *Dazn* .

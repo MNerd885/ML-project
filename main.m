@@ -5,17 +5,14 @@ clc
 
 % PARAMETRI
 
-TRAIN_PATH        = "..\datasets\SONICATEL_traffic_train.csv";
-TEST_PATH         = "..\datasets\SONICATEL_traffic_test.csv";
+TRAIN_PATH        = "datasets/SONICATEL_traffic_train.csv";
+TEST_PATH         = "datasets/SONICATEL_traffic_test.csv";
 
-% LAG rappresenta il numero di ritardi da applicare per il modello
-% autoregressivo, in questo caso 
-LAG               = 15; 
 
 % Numero di alberi da generare per Target nell'approccio con le RFs
 N_TREES           = [1 2 3 4 5 6 7 8 9 10 30 50 100 200];
 
-MIN_LEAF          = 15;
+MIN_LEAF          = 20;
 target_vars = {'VOIP', 'Netflix', 'DAZN'};
 features = {'year', 'month', 'day', 'hour', 'min', 'dayweek', 'IN', 'OUT'};
 
@@ -27,6 +24,11 @@ data_test = readtable(TEST_PATH);
 % Per la creazione del modello autoregressivo per ciascun target devo
 % generare una serie temporale che consiste nei valori che il sistema 
 % assume agli istanti precedenti, il cui numero è dettato da LAG.
+
+% LAG rappresenta il numero di ritardi da applicare per il modello
+% autoregressivo, va inserito dall'utente
+LAG = input("Inserire un valore di ritardi (LAG): ");
+
 for i = 1:3
     
     % In questo modo genero ad ogni iterazione una matrice lag sia per i
@@ -64,7 +66,7 @@ data_test = fillmissing(data_test, "linear");
 % avere solamente le features attualmente disponibili
 data_solo_feature = setdiff(data_train.Properties.VariableNames, target_vars, 'stable');
 
-% Devo in seguito definire quante sceglierne, ad esempio tra 4 e quelle
+% Devo in seguito definire quante sceglierne, ad esempio tra 5 e quelle
 % disponibili
 feat_da_selezionare = randi([5, width(data_train) - length(target_vars)]);
 
@@ -108,6 +110,12 @@ NRMSE_DAZN_RT = sqrt(mean(Y_test.DAZN - DAZN_predicted).^2) / (mean(Y_test.DAZN)
 disp("NRMSE per il RT del target DAZN: " + num2str(NRMSE_DAZN_RT*100) + "%");
 
 %% Approccio mediante Random Forests
+% Matrici che contengono i NRMSE per ogni foresta con un numero di alberi
+% differente
+NRMSE_VOIP = zeros(1,size(N_TREES,2));
+NRMSE_Netflix = zeros(1,size(N_TREES,2));
+NRMSE_DAZN = zeros(1,size(N_TREES,2));
+k = 1;
 
 for n = N_TREES
     % Fase di training delle Random Forests
@@ -115,5 +123,37 @@ for n = N_TREES
     forestNetflix = TreeBagger(n, X_train, Y_train.Netflix, 'Method', 'regression', 'MinLeafSize', MIN_LEAF);
     forestDAZN = TreeBagger(n, X_train, Y_train.DAZN, 'Method', 'regression', 'MinLeafSize', MIN_LEAF);
 
+    % Validazione delle perfomance rispetto al NRMSE
+    Y_pred_VOIP = predict(forestVOIP, X_test);
+    NRMSE_VOIP_RF = sqrt(mean(Y_test.VOIP - Y_pred_VOIP).^2) / (mean(Y_test.VOIP));
+    disp("NRMSE RF VOIP con " + num2str(n) + " alberi/o: " + num2str(NRMSE_VOIP_RF*100) + "%");
+    NRMSE_VOIP(:,k) = NRMSE_VOIP_RF*100;
 
+    Y_pred_Netflix = predict(forestNetflix, X_test);
+    NRMSE_Netflix_RF = sqrt(mean(Y_test.Netflix - Y_pred_Netflix).^2) / (mean(Y_test.Netflix));
+    disp("NRMSE RF Netflix con " + num2str(n) + " alberi/o: " + num2str(NRMSE_Netflix_RF*100) + "%");
+    NRMSE_Netflix(:,k) = NRMSE_Netflix_RF*100;
+
+    Y_pred_DAZN = predict(forestDAZN, X_test);
+    NRMSE_DAZN_RF = sqrt(mean(Y_test.DAZN - Y_pred_DAZN).^2) / (mean(Y_test.DAZN));
+    disp("NRMSE RF DAZN con " + num2str(n) + " alberi/o: " + num2str(NRMSE_DAZN_RF*100) + "%");
+    NRMSE_DAZN(:,k) = NRMSE_DAZN_RF*100;
+
+    k = k+1;
 end
+
+%% Plot NRMSE al crescere degli alberi
+
+figure()
+subplot(3,1,1)
+plot(N_TREES,NRMSE_VOIP,'-o', 'LineWidth',1); grid on;
+xlabel('Numero di alberi cresciuti');
+ylabel('NRMSE [%]');
+subplot(3,1,2)
+plot(N_TREES,NRMSE_Netflix,'-o', 'LineWidth',1); grid on;
+xlabel('Number of grown trees');
+ylabel('NRMSE [%]')
+subplot(3,1,3)
+plot(N_TREES,NRMSE_DAZN,'-o', 'LineWidth',1); grid on;
+xlabel('Numero di alberi cresciuti');
+ylabel('NRMSE [%]');
