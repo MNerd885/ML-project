@@ -30,6 +30,13 @@ Per fare il train sul dataset ottenuto di sole feature scelte
 
 Per valutare performance del mio predittore vedo come questo predice i 3 target con un dataset di test e per ciascuno di essi valuto il NRMSE di ciascun RT, scelgo quello normalizzato in modo che se ho unità di misura diverse nel mio dataset 
 
-#### Approccio con Random Forests
+## Parametri scelti per i vari test
 
-Innanzitutto posso far vedere come il numero di alberi che si sceglie per la RF influisce nell'ottenimento di un NRMSE in fase di testing che è progressivamente più piccolo, considerando l'influenza del numero di lag.
+- ### Test 1
+
+	*Min_Leaf* = 30
+	*N_TREES* = \[1 2 3 4 5 6 7 8 9 10 30 50 100 200\];
+	LAG = 75
+	I risultati per gli errori ottenuti sono
+	
+
